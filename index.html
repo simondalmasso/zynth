@@ -116,7 +116,7 @@ function buildLibrary(){
 }
 function selectSystem(name){system=name;$('systemName').textContent=name.toUpperCase();document.querySelectorAll('.system').forEach(b=>b.classList.toggle('active',b.textContent===name));resetAttractor();if(name==='Lorenz')values.rho=28;else if(name==='Chen')values.rho=28;else if(name==='Rössler')values.rho=5.7;else values.rho=1;syncControl('rho');}
 function syncControl(id){const el=$('ctl-'+id);if(el){el.value=values[id];$('out-'+id).textContent=fmt(values[id]);}}
-function routeSource(src,param){routes[src]=param;selectedSource=null;document.querySelectorAll('.source').forEach(x=>x.classList.remove('selected'));Object.keys(routes).forEach(s=>{const p=routes[s];const out=$('route-'+p);if(out)out.textContent=s.toUpperCase()+' → MOD';const c=document.querySelector('[data-param="'+p+'"]');if(c)c.classList.add('routed')});document.querySelectorAll('.control').forEach(c=>{const p=c.dataset.param;if(!Object.values(routes).includes(p))c.classList.remove('routed')});notify(src.toUpperCase()+' → '+param.toUpperCase());}
+function routeSource(src,param){routes[src]=param;selectedSource=null;document.querySelectorAll('.source').forEach(x=>x.classList.remove('selected'));document.querySelectorAll('.route').forEach(x=>x.textContent='');document.querySelectorAll('.control').forEach(x=>x.classList.remove('routed'));Object.keys(routes).forEach(s=>{const p=routes[s];const out=$('route-'+p);if(out)out.textContent+=(out.textContent?' / ':'')+s.toUpperCase()+' → MOD';const el=document.querySelector('[data-param="'+p+'"]');if(el)el.classList.add('routed')});notify(src.toUpperCase()+' → '+param.toUpperCase());}
 document.querySelectorAll('.source').forEach(el=>{
  el.addEventListener('dragstart',e=>{e.dataTransfer.setData('text/plain',el.dataset.source);selectedSource=el.dataset.source});
  el.addEventListener('click',()=>{const s=el.dataset.source;if(selectedSource===s){selectedSource=null;el.classList.remove('selected')}else{selectedSource=s;document.querySelectorAll('.source').forEach(x=>x.classList.toggle('selected',x===el));notify('SELECTED '+s.toUpperCase()+' — TAP A CONTROL')}});
@@ -151,9 +151,10 @@ function stepOne(p,dt,offset){
 function resetAttractor(){stateA={x:.1,y:0,z:0};stateB={x:.1001,y:0,z:0};trailA=[];trailB=[];time=0}
 function updateSimulation(dt){
  if(frozen)return;
+ const rate=values.rate*(sync?values.bpm/66:1);
  const steps=system==='Lorenz'||system==='Chen'||system==='Rössler'||system==='Thomas'||system==='Chua circuit'?4:1;
- for(let i=0;i<steps;i++){const h=dt/steps;if(['Lorenz','Chen','Rössler','Thomas','Chua circuit'].includes(system)){stateA=stepOne(stateA,h,0);stateB=stepOne(stateB,h,0.001)}else{time+=h*values.rate;stateA=stepOne(stateA,h,0);stateB=stepOne(stateB,h,.003)}}
- if(system==='Lorenz'||system==='Chen'||system==='Rössler'||system==='Thomas'||system==='Chua circuit')time+=dt*values.rate;
+ for(let i=0;i<steps;i++){const h=dt/steps;if(['Lorenz','Chen','Rössler','Thomas','Chua circuit'].includes(system)){stateA=stepOne(stateA,h,0);stateB=stepOne(stateB,h,0.001)}else{time+=h*rate;stateA=stepOne(stateA,h,0);stateB=stepOne(stateB,h,.003)}}
+ if(system==='Lorenz'||system==='Chen'||system==='Rössler'||system==='Thomas'||system==='Chua circuit')time+=dt*rate;
  trailA.push({...stateA});trailB.push({...stateB});if(trailA.length>1800)trailA.shift();if(trailB.length>1800)trailB.shift();
  const src=sourceValues();$('rx').textContent=stateA.x.toFixed(2);$('ry').textContent=stateA.y.toFixed(2);$('rz').textContent=stateA.z.toFixed(2);$('rg').textContent=(src.gap*100).toFixed(1)+'%';$('rl').textContent=(0.4+src.gap*.7).toFixed(3);
 }
@@ -198,7 +199,7 @@ function updateAudio(){
  const tone=modValue('tone',values.tone),res=modValue('res',values.res),level=modValue('level',values.level),pan=modValue('pan',values.pan);
  filter.frequency.setTargetAtTime(35*Math.pow(400,.01*tone),audio.currentTime,.025);filter.Q.setTargetAtTime(res,audio.currentTime,.025);
  driveNode.curve=makeDistortion(values.drive+values.fold*.35);crushNode.curve=makeCrush(values.crush);
- master.gain.setTargetAtTime(level/100*.9,audio.currentTime,.03);panner.pan.setTargetAtTime(pan/100,audio.currentTime,.03);
+ master.gain.setTargetAtTime(level/100*.9,audio.currentTime,.03);panner.pan.setTargetAtTime(pan/100,audio.currentTime,.03);voices.forEach(v=>{v.voiceBGain.gain.setTargetAtTime(values.voiceB*.5,audio.currentTime,.04);v.voiceBosc.detune.setTargetAtTime((values.phase-45)*.25,audio.currentTime,.04);v.voiceBPan.pan.setTargetAtTime(values.width/100*.8,audio.currentTime,.04)});
  delayWet.gain.setTargetAtTime(values.echo/100*.65,audio.currentTime,.04);feedback.gain.setTargetAtTime(.12+values.echo/100*.55,audio.currentTime,.04);
  reverbWet.gain.setTargetAtTime(values.reverb/100*.7,audio.currentTime,.04);chorusWet.gain.setTargetAtTime(values.chorus/100*.65,audio.currentTime,.04);
  chorusLfo.frequency.setTargetAtTime(.2+values.chorus/25,audio.currentTime,.04);chorusDepth.gain.setTargetAtTime(.001+values.chorus/100*.018,audio.currentTime,.04);
@@ -208,23 +209,24 @@ function midiFreq(m){return 440*Math.pow(2,(m-69)/12)}
 function noteOn(midi){
  initAudio();if(!audio)return;if(audio.state==='suspended')audio.resume();
  if(voices.has(midi))return;
- if(!chord&&voices.size>0)allNotesOff();
- const t=audio.currentTime,base=midiFreq(midi+values.pitch+values.oct*12+values.oct*12);
+ if(!chord&&voices.size>0)allNotesOff();if(chord&&voices.size>=4)return;
+ const t=audio.currentTime,base=midiFreq(midi+values.pitch+values.oct*12);
  const gain=audio.createGain();gain.gain.setValueAtTime(.0001,t);gain.gain.linearRampToValueAtTime(.7, t+values.attack/1000);
  gain.connect(audio.input);
  let src;
  if(sampleBuffer){src=audio.createBufferSource();src.buffer=sampleBuffer;src.playbackRate.value=Math.pow(2,(midi-36+values.pitch)/12);src.connect(gain);src.start()}
  else{src=audio.createOscillator();src.type=waveform;src.frequency.setValueAtTime(base,t);src.detune.value=values.shape*.7;src.connect(gain);src.start()}
+ const voiceBosc=audio.createOscillator(),voiceBGain=audio.createGain(),voiceBPan=audio.createStereoPanner();voiceBosc.type=waveform;voiceBosc.frequency.value=base;voiceBosc.detune.value=(values.phase-45)*.25;voiceBGain.gain.value=values.voiceB*.5;voiceBosc.connect(voiceBGain);voiceBGain.connect(voiceBPan);voiceBPan.pan.value=values.width/100*.8;voiceBPan.connect(gain);voiceBosc.start();
  const sub=audio.createOscillator(),subGain=audio.createGain();sub.type='sine';sub.frequency.value=base/2;subGain.gain.value=values.sub/100*.35;sub.connect(subGain);subGain.connect(gain);sub.start();
  let fmOsc=null;if(values.fm>0){fmOsc=audio.createOscillator();const fmGain=audio.createGain();fmOsc.frequency.value=base*2;fmGain.gain.value=values.fm*2;fmOsc.connect(fmGain);fmGain.connect(src.frequency||sub.frequency);fmOsc.start();fmOsc._gain=fmGain}
  const noiseGain=audio.createGain();noiseGain.gain.value=values.noise/100*.08;let noiseSrc=null;if(values.noise>0){const nbuf=audio.createBuffer(1,audio.sampleRate,audio.sampleRate),d=nbuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;noiseSrc=audio.createBufferSource();noiseSrc.buffer=nbuf;noiseSrc.loop=true;noiseSrc.connect(noiseGain);noiseGain.connect(gain);noiseSrc.start()}
- voices.set(midi,{src,sub,gain,fmOsc,noiseSrc});
+ voices.set(midi,{src,sub,gain,fmOsc,noiseSrc,voiceBosc,voiceBGain,voiceBPan});
  if(!latched){/* release is handled by pointer/key up */}
 }
 function noteOff(midi){
  const v=voices.get(midi);if(!v||!audio)return;
  const t=audio.currentTime;v.gain.gain.cancelScheduledValues(t);v.gain.gain.setTargetAtTime(.0001,t,Math.max(.015,values.release/3000));
- const stopAt=t+Math.max(.08,values.release/1000+.04);try{v.src.stop(stopAt);v.sub.stop(stopAt);if(v.fmOsc)v.fmOsc.stop(stopAt);if(v.noiseSrc)v.noiseSrc.stop(stopAt)}catch(e){}
+ const stopAt=t+Math.max(.08,values.release/1000+.04);try{v.src.stop(stopAt);v.sub.stop(stopAt);v.voiceBosc.stop(stopAt);if(v.fmOsc)v.fmOsc.stop(stopAt);if(v.noiseSrc)v.noiseSrc.stop(stopAt)}catch(e){}
  voices.delete(midi);
 }
 function allNotesOff(){Array.from(voices.keys()).forEach(noteOff);document.querySelectorAll('.pressed').forEach(k=>k.classList.remove('pressed'))}
