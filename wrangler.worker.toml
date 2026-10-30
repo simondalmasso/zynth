@@ -1,0 +1,12 @@
+# ZYNTH — Cloudflare Worker
+# Deploy: npx wrangler deploy --config wrangler.worker.toml
+# Local:  npx wrangler dev --config wrangler.worker.toml
+
+name = "zynth"
+main = "src/worker.js"
+compatibility_date = "2025-12-01"
+workers_dev = true
+
+rules = [
+  { type = "Text", globs = ["**/*.html"], fallthrough = true }
+]
